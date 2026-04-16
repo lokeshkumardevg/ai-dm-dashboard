@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { api } from '../api/axios';
 
@@ -9,6 +10,7 @@ import ContentFilters from '../components/content/ContentFilters';
 import CreativesTable from '../components/content/CreativesTable';
 import AiCreativeModal from '../components/content/AiCreativeModal';
 import UploadByGroupModal from '../components/content/UploadByGroupModal';
+// import AiCreativeWorkspace from '../components/content/AiCreativeWorkspace';
 
 type CreativeItem = {
   id: string;
@@ -20,6 +22,11 @@ type CreativeItem = {
   status: string;
   createdAtRaw: string;
   scheduledForRaw: string;
+   imageUrl: string;
+  thumbnailUrl: string;
+  lifetimeStartRaw?: string;
+  lifetimeEndRaw?: string;
+  isManualCreative?: boolean;
 };
 
 type UploadedGroupItem = {
@@ -29,16 +36,30 @@ type UploadedGroupItem = {
 };
 
 export const Content: React.FC = () => {
+    const navigate = useNavigate();
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState('All Creatives');
   const [search, setSearch] = useState('');
   const [creatives, setCreatives] = useState<CreativeItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [previewCreative, setPreviewCreative] = useState<CreativeItem | null>(null);
+const [watchCreative, setWatchCreative] = useState<CreativeItem | null>(null);
+const [editingCreative, setEditingCreative] = useState<CreativeItem | null>(null);
+const [editName, setEditName] = useState('');
+const [editLifetimeStart, setEditLifetimeStart] = useState('');
+const [editLifetimeEnd, setEditLifetimeEnd] = useState('');
+const [isUpdatingCreative, setIsUpdatingCreative] = useState(false);
+const [deletingCreativeId, setDeletingCreativeId] = useState<string | null>(null);
 
   // const [showGenModal, setShowGenModal] = useState(false);
   const [showAddCreativeMenu, setShowAddCreativeMenu] = useState(false);
   const [showUploadByGroupModal, setShowUploadByGroupModal] = useState(false);
   const [showBulkUploadModal, setShowBulkUploadModal] = useState(false);
   const [showAiCreativePanel, setShowAiCreativePanel] = useState(false);
+//   const [showAiCreativeWorkspace, setShowAiCreativeWorkspace] = useState(false);
+// const [workspaceProductUrl, setWorkspaceProductUrl] = useState('');
+// const [workspaceSelectedImages, setWorkspaceSelectedImages] = useState<string[]>([]);
+// const [workspaceAllImages, setWorkspaceAllImages] = useState<string[]>([]);
   
 
   const [genTopic, setGenTopic] = useState('');
@@ -70,6 +91,27 @@ export const Content: React.FC = () => {
   }, []);
 
   useEffect(() => {
+  const state = location.state as
+    | {
+        reopenAiCreativeModal?: boolean;
+        productUrl?: string;
+        genType?: string;
+      }
+    | undefined;
+
+  if (state?.reopenAiCreativeModal) {
+    setGenTopic(state.productUrl || '');
+    setGenType(state.genType || 'url_scrape');
+    setShowAiCreativePanel(true);
+
+    navigate(location.pathname, {
+      replace: true,
+      state: null,
+    });
+  }
+}, [location, navigate]);
+
+  useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
       const target = event.target as Node;
 
@@ -98,24 +140,29 @@ export const Content: React.FC = () => {
       const response = await api.get('/content');
       const json = Array.isArray(response.data) ? response.data : [];
 
-      const mapped = json.map((c: any) => ({
-        id: c._id,
-        name: c.title || 'Untitled Creative',
-        type:
-          c.contentType === 'blog'
-            ? 'text'
-            : c.contentType === 'video'
-            ? 'video'
-            : 'image',
-        platform: Array.isArray(c.platforms) ? c.platforms[0] || 'Meta' : 'Meta',
-        uploadDate: c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A',
-        lifetime: c.scheduledFor
-          ? `${new Date(c.scheduledFor).toLocaleDateString()} (Scheduled)`
-          : 'Active Forever',
-        status: c.status || 'draft',
-        createdAtRaw: c.createdAt || '',
-        scheduledForRaw: c.scheduledFor || '',
-      }));
+     const mapped = json.map((c: any) => ({
+  id: c._id,
+  name: c.title || 'Untitled Creative',
+  type:
+    c.contentType === 'blog'
+      ? 'text'
+      : c.contentType === 'video'
+      ? 'video'
+      : 'image',
+  platform: Array.isArray(c.platforms) ? c.platforms[0] || 'Meta' : 'Meta',
+  uploadDate: c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A',
+  lifetime: c.scheduledFor
+    ? `${new Date(c.scheduledFor).toLocaleDateString()} (Scheduled)`
+    : 'Active Forever',
+  status: c.status || 'draft',
+  createdAtRaw: c.createdAt || '',
+  scheduledForRaw: c.scheduledFor || '',
+  imageUrl: c.imageUrl || '',
+  thumbnailUrl: c.thumbnailUrl || c.imageUrl || '',
+  lifetimeStartRaw: c.lifetimeStart || '',
+  lifetimeEndRaw: c.lifetimeEnd || '',
+  isManualCreative: !!c.isManualCreative,
+}));
 
       setCreatives(mapped);
     } catch (err: any) {
@@ -144,7 +191,7 @@ export const Content: React.FC = () => {
       });
 
       toast.success('AI Content Generated & Saved!', { id: 'gen-content' });
-      setShowGenModal(false);
+      setShowAiCreativePanel(false);
       setGenTopic('');
       await fetchCreatives();
     } catch (err: any) {
@@ -221,14 +268,136 @@ export const Content: React.FC = () => {
   };
 
 
-  const handleOpenAiCreative = () => {
+ const handleOpenAiCreative = () => {
   setShowAiCreativePanel(true);
 };
 
 const handleCloseAiCreative = () => {
   setShowAiCreativePanel(false);
 };
-  const handleGroupFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+
+const handleContinueToAiWorkspace = (payload: {
+  url: string;
+  type: string;
+  selectedImages: string[];
+  allImages: string[];
+}) => {
+  setGenType(payload.type);
+  setShowAiCreativePanel(false);
+
+  navigate('/content/ai-workspace', {
+    state: {
+      productUrl: payload.url,
+      selectedImages: payload.selectedImages,
+      allImages: payload.allImages,
+      genType: payload.type,
+    },
+  });
+};
+
+
+const handlePreviewCreative = (creative: CreativeItem) => {
+  if (!creative.imageUrl) {
+    toast.error('Preview image not available for this creative.');
+    return;
+  }
+  setPreviewCreative(creative);
+};
+
+const handleWatchCreative = (creative: CreativeItem) => {
+  setWatchCreative(creative);
+};
+
+const handleOpenEditCreative = (creative: CreativeItem) => {
+  setEditingCreative(creative);
+  setEditName(creative.name || '');
+  setEditLifetimeStart(
+    creative.lifetimeStartRaw
+      ? new Date(creative.lifetimeStartRaw).toISOString().slice(0, 10)
+      : ''
+  );
+  setEditLifetimeEnd(
+    creative.lifetimeEndRaw
+      ? new Date(creative.lifetimeEndRaw).toISOString().slice(0, 10)
+      : ''
+  );
+};
+
+const handleCloseEditCreative = () => {
+  setEditingCreative(null);
+  setEditName('');
+  setEditLifetimeStart('');
+  setEditLifetimeEnd('');
+};
+
+const handleDeleteCreative = async (creative: CreativeItem) => {
+  const confirmed = window.confirm(`Delete "${creative.name}" from Creative Hub?`);
+  if (!confirmed) return;
+
+  try {
+    setDeletingCreativeId(creative.id);
+    toast.loading('Deleting creative...', { id: 'delete-creative' });
+
+    await api.delete(`/content/${creative.id}`);
+
+    setCreatives((prev) => prev.filter((item) => item.id !== creative.id));
+
+    if (previewCreative?.id === creative.id) setPreviewCreative(null);
+    if (watchCreative?.id === creative.id) setWatchCreative(null);
+    if (editingCreative?.id === creative.id) handleCloseEditCreative();
+
+    toast.success('Creative deleted successfully.', { id: 'delete-creative' });
+  } catch (error: any) {
+    toast.error(
+      error?.response?.data?.message || 'Failed to delete creative.',
+      { id: 'delete-creative' }
+    );
+  } finally {
+    setDeletingCreativeId(null);
+  }
+};
+
+const handleSaveCreativeEdit = async () => {
+  if (!editingCreative) return;
+
+  if (!editName.trim()) {
+    toast.error('Creative name is required.');
+    return;
+  }
+
+  if (editLifetimeStart && editLifetimeEnd) {
+    if (new Date(editLifetimeEnd) < new Date(editLifetimeStart)) {
+      toast.error('Limited lifetime end date must be after start date.');
+      return;
+    }
+  }
+
+  try {
+    setIsUpdatingCreative(true);
+    toast.loading('Updating creative...', { id: 'update-creative' });
+
+    await api.patch(`/content/${editingCreative.id}`, {
+      title: editName.trim(),
+      lifetimeStart: editLifetimeStart || null,
+      lifetimeEnd: editLifetimeEnd || null,
+    });
+
+    await fetchCreatives();
+    handleCloseEditCreative();
+
+    toast.success('Creative updated successfully.', { id: 'update-creative' });
+  } catch (error: any) {
+    toast.error(
+      error?.response?.data?.message || 'Failed to update creative.',
+      { id: 'update-creative' }
+    );
+  } finally {
+    setIsUpdatingCreative(false);
+  }
+};
+
+
+const handleGroupFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []).filter((file) =>
       file.type.startsWith('image/')
     );
@@ -492,24 +661,30 @@ const handleCloseAiCreative = () => {
           setSearch={setSearch}
         />
 
-       {showAiCreativePanel ? (
-  <div style={{ marginTop: '24px' }}>
-    <AiCreativeModal
-      open={showAiCreativePanel}
-      genTopic={genTopic}
-      genType={genType}
-      genTone={genTone}
-      generating={generating}
-      setGenTopic={setGenTopic}
-      setGenType={setGenType}
-      setGenTone={setGenTone}
-      onClose={handleCloseAiCreative}
-      onGenerate={handleOpenAiCreative}
-    />
-  </div>
-) : (
-  <CreativesTable creatives={filtered} />
-)}
+      <CreativesTable
+  creatives={filtered}
+  onPreviewCreative={handlePreviewCreative}
+  onWatchCreative={handleWatchCreative}
+  onEditCreative={handleOpenEditCreative}
+  onDeleteCreative={handleDeleteCreative}
+  deletingCreativeId={deletingCreativeId}
+/>
+
+{showAiCreativePanel && (
+  <AiCreativeModal
+    open={showAiCreativePanel}
+    genTopic={genTopic}
+    genType={genType}
+    genTone={genTone}
+    generating={generating}
+    setGenTopic={setGenTopic}
+    setGenType={setGenType}
+    setGenTone={setGenTone}
+    onClose={handleCloseAiCreative}
+    onGenerate={handleGenerate}
+    onContinueToWorkspace={handleContinueToAiWorkspace}
+  />
+)}                                                                              
       </div>
 
       {/* <AiCreativeModal
@@ -524,6 +699,291 @@ const handleCloseAiCreative = () => {
         onClose={() => setShowGenModal(false)}
         onGenerate={handleGenerate}
       /> */}
+
+
+      {previewCreative && (
+  <div
+    onClick={() => setPreviewCreative(null)}
+    style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(17, 24, 39, 0.45)',
+      backdropFilter: 'blur(8px)',
+      zIndex: 2000,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '24px',
+    }}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        width: '100%',
+        maxWidth: '860px',
+        background: '#fff',
+        borderRadius: '32px',
+        padding: '24px',
+        boxShadow: '0 30px 80px rgba(15, 23, 42, 0.18)',
+        border: '1px solid #f1eafe',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '18px',
+          gap: '16px',
+        }}
+      >
+        <div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#18181b' }}>
+            {previewCreative.name}
+          </div>
+          <div style={{ marginTop: '4px', fontSize: '0.9rem', color: '#71717a' }}>
+            {previewCreative.platform} • {previewCreative.uploadDate}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setPreviewCreative(null)}
+          style={{
+            width: '42px',
+            height: '42px',
+            borderRadius: '999px',
+            border: '1px solid #ece7f9',
+            background: '#fafafa',
+            cursor: 'pointer',
+            fontSize: '1.2rem',
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          borderRadius: '20px',
+          overflow: 'hidden',
+          maxHeight: '70vh',
+          background: '#fff',
+        }}
+      >
+        <img
+          src={previewCreative.imageUrl}
+          alt={previewCreative.name}
+          style={{
+            maxWidth: '100%',
+            maxHeight: '70vh',
+            objectFit: 'contain',
+            display: 'block',
+          }}
+        />
+      </div>
+    </div>
+  </div>
+)}
+
+{watchCreative && (
+  <div
+    onClick={() => setWatchCreative(null)}
+    style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(17, 24, 39, 0.35)',
+      backdropFilter: 'blur(6px)',
+      zIndex: 1995,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '24px',
+    }}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        width: '100%',
+        maxWidth: '520px',
+        background: '#fff',
+        borderRadius: '28px',
+        padding: '24px',
+        boxShadow: '0 24px 60px rgba(15, 23, 42, 0.16)',
+        border: '1px solid #f1eafe',
+      }}
+    >
+      <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#18181b', marginBottom: '18px' }}>
+        Creative Details
+      </div>
+
+      <div style={{ display: 'grid', gap: '12px',color: '#18181b' }}>    
+        <div><strong>Name:</strong> {watchCreative.name}</div>
+        <div><strong>Status:</strong> {watchCreative.status}</div>
+        <div><strong>Upload Date:</strong> {watchCreative.uploadDate}</div>
+        <div><strong>Lifetime Start:</strong> {watchCreative.lifetimeStartRaw ? new Date(watchCreative.lifetimeStartRaw).toLocaleDateString() : '-'}</div>
+        <div><strong>Lifetime End:</strong> {watchCreative.lifetimeEndRaw ? new Date(watchCreative.lifetimeEndRaw).toLocaleDateString() : '-'}</div>
+      </div>
+    </div>
+  </div>
+)}
+
+{editingCreative && (
+  <div
+    style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(17, 24, 39, 0.28)',
+      zIndex: 2010,
+      display: 'flex',
+      justifyContent: 'flex-end',
+    }}
+    onClick={handleCloseEditCreative}
+  >
+    <div
+      onClick={(e) => e.stopPropagation()}
+      style={{
+        width: '100%',
+        maxWidth: '520px',
+        height: '100vh',
+        background: '#fff',
+        boxShadow: '-20px 0 60px rgba(15, 23, 42, 0.14)',
+        padding: '28px 28px 24px',
+        overflowY: 'auto',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: '28px',
+        }}
+      >
+        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#18181b' }}>
+          Edit
+        </div>
+
+        <button
+          type="button"
+          onClick={handleCloseEditCreative}
+          style={{
+            width: '42px',
+            height: '42px',
+            borderRadius: '999px',
+            border: '1px solid #ece7f9',
+            background: '#fafafa',
+            cursor: 'pointer',
+            fontSize: '1.2rem',
+          }}
+        >
+          ×
+        </button>
+      </div>
+
+      <div style={{ marginBottom: '22px' }}>
+        <label style={{ display: 'block', marginBottom: '10px', fontWeight: 700, color: '#18181b' }}>
+          Creative Name
+        </label>
+        <input
+          type="text"
+          value={editName}
+          onChange={(e) => setEditName(e.target.value)}
+          style={{
+            width: '100%',
+            height: '52px',
+            borderRadius: '999px',
+            border: '1.5px solid #e5e7eb',
+            padding: '0 18px',
+            fontSize: '1rem',
+            outline: 'none',
+          }}
+        />
+      </div>
+
+      <div style={{ marginBottom: '22px' }}>
+        <label style={{ display: 'block', marginBottom: '10px', fontWeight: 700, color: '#18181b' }}>
+          Limited Lifetime
+        </label>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <input
+            type="date"
+            value={editLifetimeStart}
+            onChange={(e) => setEditLifetimeStart(e.target.value)}
+            style={{
+              width: '100%',
+              height: '52px',
+              borderRadius: '999px',
+              border: '1.5px solid #e5e7eb',
+              padding: '0 18px',
+              fontSize: '1rem',
+              outline: 'none',
+            }}
+          />
+
+          <input
+            type="date"
+            value={editLifetimeEnd}
+            onChange={(e) => setEditLifetimeEnd(e.target.value)}
+            style={{
+              width: '100%',
+              height: '52px',
+              borderRadius: '999px',
+              border: '1.5px solid #e5e7eb',
+              padding: '0 18px',
+              fontSize: '1rem',
+              outline: 'none',
+            }}
+          />
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '40px' }}>
+        <button
+          type="button"
+          onClick={handleCloseEditCreative}
+          style={{
+            height: '52px',
+            minWidth: '120px',
+            padding: '0 24px',
+            borderRadius: '999px',
+            border: '1px solid #e5e7eb',
+            background: '#fff',
+            color: '#18181b',
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          onClick={handleSaveCreativeEdit}
+          disabled={isUpdatingCreative}
+          style={{
+            height: '52px',
+            minWidth: '120px',
+            padding: '0 24px',
+            borderRadius: '999px',
+            border: 'none',
+            background: 'linear-gradient(90deg, #8b5cf6 0%, #6d28d9 100%)',
+            color: '#fff',
+            fontWeight: 700,
+            cursor: isUpdatingCreative ? 'not-allowed' : 'pointer',
+            opacity: isUpdatingCreative ? 0.75 : 1,
+          }}
+        >
+          {isUpdatingCreative ? 'Saving...' : 'Save'}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
 
       <UploadByGroupModal
         open={showUploadByGroupModal}
@@ -560,6 +1020,9 @@ const handleCloseAiCreative = () => {
 };
 
 export default Content;
+
+
+
 
 
 // import React, { useEffect, useMemo, useRef, useState } from 'react';
