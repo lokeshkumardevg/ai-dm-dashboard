@@ -9,6 +9,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import OpenAI from 'openai';
 import { AiAnalysis, AiAnalysisDocument } from './schemas/ai-analysis.schema';
+import { BrandProfile } from './schemas/brand-profile.schema';
 
 @Injectable()
 export class AiService {
@@ -186,7 +187,7 @@ Return ONLY raw valid JSON with these exact keys:
       }
 
       return result;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Failed to complete ${analysisType} analysis`, error);
       throw new BadRequestException(`Failed to complete ${analysisType} analysis: ${error.message}`);
     }
@@ -205,9 +206,9 @@ Return ONLY raw valid JSON with these exact keys:
         .exec();
 
       return analyses;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Failed to fetch analysis history for user ${userId}`, error);
-      throw new BadRequestException('Failed to fetch analysis history: ' + error.message);
+      throw new BadRequestException('Failed to fetch analysis history: ' + (error.message || 'Unknown error'));
     }
   }
 
@@ -224,37 +225,41 @@ Return ONLY raw valid JSON with these exact keys:
       }
 
       this.logger.log(`Analysis ${analysisId} deleted for user ${userId}`);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Failed to delete analysis ${analysisId}`, error);
-      throw new BadRequestException('Failed to delete analysis: ' + error.message);
+      throw new BadRequestException('Failed to delete analysis: ' + (error.message || 'Unknown error'));
     }
   }
 
   /**
    * Generate content using OpenAI API
    */
-  async generateContent(userPrompt: string, systemPrompt: string): Promise<string> {
+  async generateContent(userPrompt: string, systemPrompt: string, schema?: any): Promise<any> {
     try {
-      const message = await this.openai.chat.completions.create({
+      const completion = await this.openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
           {
             role: 'system',
-            content: systemPrompt,
+            content: systemPrompt || '',
           },
           {
             role: 'user',
             content: userPrompt,
           },
         ],
-        temperature: 0.7,
-        max_tokens: 2000,
+        temperature: 0.3,
+        max_tokens: 4000,
+        response_format: schema ? { type: "json_schema", json_schema: schema } : undefined,
       });
 
-      return message.choices[0].message.content || '';
-    } catch (error) {
+      if (schema) {
+        return JSON.parse(completion.choices[0].message.content || '{}');
+      }
+      return completion.choices[0].message.content || '';
+    } catch (error: any) {
       this.logger.error('OpenAI API Error', error);
-      throw new BadRequestException('Failed to generate content: ' + error.message);
+      throw new BadRequestException('Failed to generate content: ' + (error.message || 'Unknown error'));
     }
   }
 
@@ -274,12 +279,150 @@ Return ONLY raw valid JSON with these exact keys:
         return image.data[0].url;
       }
       return 'https://via.placeholder.com/1024x1024?text=AI+Generated+Image';
-    } catch (error) {
+    } catch (error: any) {
       this.logger.warn('Image generation failed, returning placeholder', error);
       // Return a placeholder URL if image generation fails
       return 'https://via.placeholder.com/1024x1024?text=AI+Generated+Image';
     }
   }
+
+  /**
+   * Generate Brand Profile with guaranteed JSON structure
+   */
+  async generateBrandProfile(url: string, brandName: string, scrapedContext?: string): Promise<any> {
+  const brandProfileSchema = {
+    name: "brand_profile",
+    strict: true,
+    schema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        tagline: { type: "string" },
+        description: { type: "string" },
+        lifecycle: { type: "string", enum: ["Startup", "Growth", "Scale", "Enterprise"] },
+        companySize: { type: "string", enum: ["Solo", "Startup", "SMB", "Mid-Market", "Enterprise"] },
+        targetMarket: { type: "string" },
+        location: { type: "string" },
+        businessModel: { type: "string", enum: ["SaaS", "Marketplace", "Agency", "E-Commerce", "B2B", "B2C"] },
+        tags: { type: "array", items: { type: "string" } },
+        brandDna: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            brandTone: { type: "string" },
+            marketKeywords: { type: "array", items: { type: "string" } }
+          },
+          required: ["brandTone", "marketKeywords"]
+        },
+        coreAdvantages: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            valueProposition: { type: "string" },
+            differentiators: { type: "array", items: { type: "string" } }
+          },
+          required: ["valueProposition", "differentiators"]
+        },
+        features: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              title: { type: "string" },
+              description: { type: "string" },
+              icon: { type: "string" }
+            },
+            required: ["title", "description", "icon"]
+          }
+        },
+        targetAudience: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              segment: { type: "string" },
+              description: { type: "string" },
+              tags: { type: "array", items: { type: "string" } }
+            },
+            required: ["segment", "description", "tags"]
+          }
+        },
+        competitors: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              name: { type: "string" },
+              type: { type: "string" },
+              description: { type: "string" }
+            },
+            required: ["name", "type", "description"]
+          }
+        },
+        reachAndEcosystem: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            marketingChannels: { type: "array", items: { type: "string" } },
+            customerHangouts: { type: "array", items: { type: "string" } }
+          },
+          required: ["marketingChannels", "customerHangouts"]
+        },
+        impactAnalysis: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            revenue: { type: "array", items: { type: "string" } },
+            cost: { type: "array", items: { type: "string" } },
+            policy: { type: "array", items: { type: "string" } },
+            technology: { type: "array", items: { type: "string" } }
+          },
+          required: ["revenue", "cost", "policy", "technology"]
+        }
+      },
+      required: [
+        "tagline",
+        "description",
+        "lifecycle",
+        "companySize",
+        "targetMarket",
+        "location",
+        "businessModel",
+        "tags",
+        "brandDna",
+        "coreAdvantages",
+        "features",
+        "targetAudience",
+        "competitors",
+        "reachAndEcosystem",
+        "impactAnalysis"
+      ]
+    }
+  };
+
+  const prompt = `You are an expert brand strategist. Analyse the brand "${brandName}" at ${url}.
+
+Website context:
+${scrapedContext || `Brand: ${brandName}\nURL: ${url}`}
+
+Return a comprehensive brand profile matching the required JSON schema exactly.
+
+Important rules:
+- Always include every field from the schema
+- Never omit keys
+- Use "" for unknown strings
+- Use [] for unknown arrays
+- Every feature must include title, description, and icon
+- Every target audience item must include segment, description, and tags
+- Do not invent facts beyond the provided context`;
+
+  const systemPrompt = `You are a world-class brand strategist. Respond ONLY with valid JSON matching the provided schema exactly.`;
+
+  return this.generateContent(prompt, systemPrompt, brandProfileSchema);
+}
 
   /**
    * Get comprehensive marketing strategy based on URL
@@ -309,11 +452,12 @@ Return ONLY raw valid JSON with these exact keys:
         data: parsed,
         timestamp: new Date().toISOString(),
       };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error('Failed to get marketing strategy', error);
-      throw new BadRequestException('Failed to generate marketing strategy: ' + error.message);
+      throw new BadRequestException('Failed to generate marketing strategy: ' + (error.message || 'Unknown error'));
     }
   }
+}
 
 async generateImageFromReferences(payload: {
   prompt: string;

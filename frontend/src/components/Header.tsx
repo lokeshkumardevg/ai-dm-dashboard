@@ -226,7 +226,7 @@ export const Header: React.FC = () => {
               <input 
                 type="text" 
                 className="input-field" 
-                placeholder="e.g. Acme Global Store" 
+                placeholder="e.g. amazon" 
                 value={newSiteName}
                 onChange={e => setNewSiteName(e.target.value)}
                 autoFocus
@@ -238,7 +238,7 @@ export const Header: React.FC = () => {
               <input 
                 type="text" 
                 className="input-field" 
-                placeholder="https://acme-store.com" 
+                placeholder="https://amazon.com" 
                 value={newSiteUrl}
                 onChange={e => setNewSiteUrl(e.target.value)}
               />
