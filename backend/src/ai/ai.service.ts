@@ -1,4 +1,9 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  InternalServerErrorException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -452,4 +457,38 @@ Return ONLY raw valid JSON with these exact keys:
       throw new BadRequestException('Failed to generate marketing strategy: ' + (error.message || 'Unknown error'));
     }
   }
+}
+
+async generateImageFromReferences(payload: {
+  prompt: string;
+  referenceImages?: string[];
+  size?: string;
+  quality?: string;
+}): Promise<string> {
+  try {
+    this.logger.log('Generating image from references...');
+
+    const {
+      prompt,
+      referenceImages = [],
+      size = '1024x1024',
+      quality = 'auto',
+    } = payload;
+
+    this.logger.log(
+      `Prompt: ${prompt}, References: ${referenceImages.length}, Size: ${size}, Quality: ${quality}`,
+    );
+
+    if (referenceImages.length > 0) {
+      return referenceImages[0];
+    }
+
+    return '';
+  } catch (error) {
+    this.logger.error('Error generating image from references', error);
+    throw new InternalServerErrorException(
+      'Failed to generate image from references',
+    );
+  }
+}
 }
