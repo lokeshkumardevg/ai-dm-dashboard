@@ -80,6 +80,9 @@ export class CampaignsService {
   }
   async deepResearch(url: string): Promise<any> {
     this.logger.log(`Performing deep research for URL: ${url}`);
-    return await this.aiService.getMarketingStrategy(url);
+    return await this.aiService.generateContent(
+      `Provide marketing strategy for website: ${url}`,
+      'Strategic marketing consultant. Return JSON only.'
+    );
   }
 }
